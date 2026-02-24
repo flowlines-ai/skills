@@ -176,6 +176,35 @@ await withContext({ userId: "user-A", sessionId: "sess-1" }, async () => {
 });
 ```
 
+## Context integration guidance
+
+When integrating `withContext`, you MUST wrap LLM calls with context. Follow these steps:
+
+1. **Identify existing data** in the codebase that maps to `userId`, `sessionId`, and `agentId`:
+   - `userId`: the end-user making the request (e.g., authenticated user ID, email, API key owner)
+   - `sessionId`: the conversation or session grouping multiple interactions (e.g., chat thread ID, session token, conversation UUID)
+   - `agentId`: the AI agent or assistant handling the request (e.g., agent name, bot identifier, assistant ID)
+
+2. **If obvious mappings exist**, use them directly. For example, if the app has `req.user.id` and a `threadId`, wire them in:
+   ```typescript
+   await withContext({ userId: req.user.id, sessionId: threadId }, async () => { ... });
+   ```
+
+3. **If mappings are unclear**, ask the user which variables or fields should be used for `userId`, `sessionId`, and `agentId`.
+
+4. **If no data is available yet**, propose using placeholder values with TODO comments so the integration is functional and easy to complete later:
+   ```typescript
+   await withContext(
+     {
+       userId: "anonymous", // TODO: replace with actual user identifier
+       sessionId: `sess-${Date.now()}`, // TODO: replace with actual session/conversation ID
+       agentId: "my-agent", // TODO: replace with actual agent identifier
+     },
+     async () => { ... }
+   );
+   ```
+   Only include fields that are relevant. `sessionId` and `agentId` can be omitted entirely if not applicable.
+
 ## Selective Instrumentation with `instrumentModules`
 
 By default, all 13+ supported libraries are instrumented. To instrument only specific libraries, pass `instrumentModules` with the imported modules. **The required import style varies by library:**

@@ -131,6 +131,34 @@ finally:
 
 `set_context()` / `clear_context()` are static methods on the `Flowlines` class.
 
+## Context integration guidance
+
+When integrating `flowlines.context()`, you MUST wrap LLM calls with context. Follow these steps:
+
+1. **Identify existing data** in the codebase that maps to `user_id`, `session_id`, and `agent_id`:
+   - `user_id`: the end-user making the request (e.g., authenticated user ID, email, API key owner)
+   - `session_id`: the conversation or session grouping multiple interactions (e.g., chat thread ID, session token, conversation UUID)
+   - `agent_id`: the AI agent or assistant handling the request (e.g., agent name, bot identifier, assistant ID)
+
+2. **If obvious mappings exist**, use them directly. For example, if the app has `request.user.id` and a `thread_id`, wire them in:
+   ```python
+   with flowlines.context(user_id=request.user.id, session_id=thread_id):
+       ...
+   ```
+
+3. **If mappings are unclear**, ask the user which variables or fields should be used for `user_id`, `session_id`, and `agent_id`.
+
+4. **If no data is available yet**, propose using placeholder values with TODO comments so the integration is functional and easy to complete later:
+   ```python
+   with flowlines.context(
+       user_id="anonymous",  # TODO: replace with actual user identifier
+       session_id=f"sess-{uuid.uuid4().hex[:8]}",  # TODO: replace with actual session/conversation ID
+       agent_id="my-agent",  # TODO: replace with actual agent identifier
+   ):
+       ...
+   ```
+   Only include fields that are relevant. `session_id` and `agent_id` can be omitted entirely if not applicable.
+
 ## Constructor parameters
 
 ```python
