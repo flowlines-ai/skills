@@ -22,19 +22,20 @@ npm install @flowlines/sdk
 
 ## Public API
 
-The SDK exports exactly 4 items:
+The SDK exports exactly 5 items:
 
 ```typescript
 import { Flowlines, FlowlinesExporter, withContext } from "@flowlines/sdk";
-import type { FlowlinesConfig } from "@flowlines/sdk";
+import type { FlowlinesConfig, FlowlinesContext } from "@flowlines/sdk";
 ```
 
 | Export | Kind | Purpose |
 |---|---|---|
 | `Flowlines` | Class | Main entry point. Initializes instrumentation and manages lifecycle. |
-| `withContext` | Function | Attaches user/conversation metadata to all LLM spans within a callback. |
+| `withContext` | Function | Attaches user/session/agent metadata to all LLM spans within a callback. |
 | `FlowlinesExporter` | Class | Custom span exporter for advanced OpenTelemetry composition. |
 | `FlowlinesConfig` | Type | Configuration interface for `Flowlines` constructor. |
+| `FlowlinesContext` | Type | Context object passed to `withContext`. |
 
 ## Configuration
 
@@ -77,8 +78,8 @@ const flowlines = new Flowlines({
 // Now create your AI clients — they will be automatically instrumented.
 const openai = new OpenAI();
 
-// Use withContext to attach user/conversation metadata to spans.
-const response = await withContext("user-123", "conv-456", () =>
+// Use withContext to attach user/session metadata to spans.
+const response = await withContext({ userId: "user-123", sessionId: "sess-456" }, () =>
   openai.chat.completions.create({
     model: "gpt-4o",
     messages: [{ role: "user", content: "Hello" }],
@@ -133,38 +134,44 @@ const flowlines = new Flowlines({
 
 ## Using `withContext()`
 
-`withContext` attaches `flowlines.user_id` and `flowlines.conversation_id` attributes to all LLM spans created within its callback. This is how Flowlines associates traces with users and conversations.
+`withContext` attaches `flowlines.user_id`, `flowlines.session_id`, and `flowlines.agent_id` attributes to all LLM spans created within its callback. This is how Flowlines associates traces with users, sessions, and agents.
 
 ```typescript
-function withContext<T>(
-  userId: string,
-  conversationId: string | undefined,
-  fn: () => T,
-): T;
+interface FlowlinesContext {
+  userId: string;
+  sessionId?: string;
+  agentId?: string;
+}
+
+function withContext<T>(ctx: FlowlinesContext, fn: () => T): T;
 ```
 
 - `userId` is required (string)
-- `conversationId` is optional (pass `undefined` to omit)
+- `sessionId` is optional (omit to skip)
+- `agentId` is optional (omit to skip)
 - `fn` can be sync or async — the return value (or Promise) is forwarded
 - Supports nesting: inner calls override outer values
 - Must wrap every AI/LLM call that should carry user context
 
 ```typescript
-// Async usage
-const result = await withContext("user-123", "conv-456", async () => {
-  return await openai.chat.completions.create({ /* ... */ });
-});
+// Async usage with session and agent
+const result = await withContext(
+  { userId: "user-123", sessionId: "sess-456", agentId: "agent-1" },
+  async () => {
+    return await openai.chat.completions.create({ /* ... */ });
+  }
+);
 
-// Without conversation ID
-await withContext("user-123", undefined, async () => {
+// Without session or agent ID
+await withContext({ userId: "user-123" }, async () => {
   await anthropic.messages.create({ /* ... */ });
 });
 
 // Nested contexts (inner overrides outer)
-await withContext("user-A", "conv-1", async () => {
-  // spans here have user_id="user-A", conversation_id="conv-1"
-  await withContext("user-B", "conv-2", async () => {
-    // spans here have user_id="user-B", conversation_id="conv-2"
+await withContext({ userId: "user-A", sessionId: "sess-1" }, async () => {
+  // spans here have user_id="user-A", session_id="sess-1"
+  await withContext({ userId: "user-B", sessionId: "sess-2" }, async () => {
+    // spans here have user_id="user-B", session_id="sess-2"
   });
 });
 ```
@@ -222,7 +229,7 @@ Supported keys: `openAI`, `anthropic`, `cohere`, `bedrock`, `google_vertexai`, `
 
 3. **Always call `shutdown()` before process exit.** This flushes any pending spans to the backend. Without it, the last batch of traces may be lost.
 
-4. **Wrap LLM calls with `withContext()` to associate traces with users.** Without `withContext`, spans are still exported but lack user/conversation metadata.
+4. **Wrap LLM calls with `withContext()` to associate traces with users.** Without `withContext`, spans are still exported but lack user/session/agent metadata.
 
 5. **The SDK only exports LLM-related spans.** It filters for spans with `gen_ai.*` or `ai.*` attribute prefixes. Non-LLM OpenTelemetry spans (HTTP, DB, etc.) are discarded by the Flowlines exporter.
 
@@ -274,8 +281,8 @@ const flowlines = new Flowlines({
 const client = new Anthropic();
 
 // 3. Wrap calls with withContext
-const conversationId = `conv-${Date.now()}`;
-const reply = await withContext("user-123", conversationId, () =>
+const sessionId = `sess-${Date.now()}`;
+const reply = await withContext({ userId: "user-123", sessionId }, () =>
   client.messages.create({
     model: "claude-sonnet-4-20250514",
     max_tokens: 1024,

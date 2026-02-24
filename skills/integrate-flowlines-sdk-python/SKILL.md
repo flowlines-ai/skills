@@ -99,20 +99,20 @@ Flowlines adds its span processor to the existing Traceloop `TracerProvider`. No
 
 3. **`has_external_otel` and `has_traceloop` are mutually exclusive.** Setting both to `True` raises `ValueError`.
 
-4. **`user_id` is mandatory in `context()`.** The context manager requires `user_id` as a keyword argument. `conversation_id` is optional.
+4. **`user_id` is mandatory in `context()`.** The context manager requires `user_id` as a keyword argument. `session_id` and `agent_id` are optional.
 
 5. **Context does not auto-propagate to child threads/tasks.** If using threads or async tasks, set context in each thread/task explicitly.
 
-## User and conversation tracking
+## User, session, and agent tracking
 
-Tag LLM calls with user/conversation IDs using the context manager:
+Tag LLM calls with user/session/agent IDs using the context manager:
 
 ```python
-with flowlines.context(user_id="user-42", conversation_id="conv-abc"):
-    client.chat.completions.create(...)  # this span gets user_id and conversation_id
+with flowlines.context(user_id="user-42", session_id="sess-abc", agent_id="agent-1"):
+    client.chat.completions.create(...)  # this span gets user_id, session_id, and agent_id
 ```
 
-`conversation_id` is optional:
+`session_id` and `agent_id` are optional:
 
 ```python
 with flowlines.context(user_id="user-42"):
@@ -122,7 +122,7 @@ with flowlines.context(user_id="user-42"):
 For cases where a context manager doesn't fit (e.g., across request boundaries in web frameworks), use the imperative API:
 
 ```python
-token = Flowlines.set_context(user_id="user-42", conversation_id="conv-abc")
+token = Flowlines.set_context(user_id="user-42", session_id="sess-abc", agent_id="agent-1")
 try:
     client.chat.completions.create(...)
 finally:
@@ -148,8 +148,8 @@ Flowlines(
 | Method / attribute | Description |
 |-|-|
 | `Flowlines(api_key, ...)` | Constructor. Initializes the SDK (singleton). |
-| `flowlines.context(user_id=..., conversation_id=...)` | Context manager to tag spans with user/conversation. |
-| `Flowlines.set_context(user_id=..., conversation_id=...)` | Static. Imperative context setting; returns a token. |
+| `flowlines.context(user_id=..., session_id=..., agent_id=...)` | Context manager to tag spans with user/session/agent. |
+| `Flowlines.set_context(user_id=..., session_id=..., agent_id=...)` | Static. Imperative context setting; returns a token. |
 | `Flowlines.clear_context(token)` | Static. Restores previous context using the token. |
 | `flowlines.create_span_processor()` | Returns a `SpanProcessor`. Mode B1 only. Call once. |
 | `flowlines.get_instrumentors()` | Returns list of available instrumentor instances. |
