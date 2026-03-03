@@ -9,7 +9,7 @@ description: Integrates Flowlines observability SDK into Python LLM applications
 
 Flowlines is an observability SDK for LLM-powered Python applications. It instruments LLM provider APIs using OpenTelemetry, automatically capturing requests, responses, timing, and errors. It filters telemetry to only LLM-related spans and exports them via OTLP/HTTP to the Flowlines backend.
 
-Supported LLM providers: OpenAI, Anthropic, AWS Bedrock, Cohere, Google Generative AI, Vertex AI, Together AI.
+Supported LLM providers: OpenAI, Anthropic, Google Generative AI (Gemini), AWS Bedrock, Cohere, Vertex AI, Together AI.
 Supported frameworks/tools: LangChain, LlamaIndex, MCP, Pinecone, ChromaDB, Qdrant.
 
 ## Installation
@@ -33,20 +33,20 @@ pip install flowlines[openai,anthropic]
 pip install flowlines[all]
 ```
 
-Available extras: `openai`, `anthropic`, `bedrock`, `cohere`, `google-generativeai`, `vertexai`, `together`, `pinecone`, `chromadb`, `qdrant`, `langchain`, `llamaindex`, `mcp`.
+Available extras: `openai`, `anthropic`, `google-generativeai`, `bedrock`, `cohere`, `vertexai`, `together`, `pinecone`, `chromadb`, `qdrant`, `langchain`, `llamaindex`, `mcp`.
 
 ## Integration
 
-There are three integration modes. Pick the one that matches the project's OpenTelemetry situation.
+There are two integration modes. Pick the one that matches the project's OpenTelemetry situation.
 
 ### Mode A — No existing OpenTelemetry setup (default)
 
 Use this when the project does NOT already have its own OpenTelemetry `TracerProvider`. This is the most common case.
 
 ```python
-from flowlines import Flowlines
+import flowlines
 
-flowlines = Flowlines(api_key="<FLOWLINES_API_KEY>")
+flowlines.init(api_key="<FLOWLINES_API_KEY>")
 ```
 
 This single call:
@@ -57,13 +57,13 @@ This single call:
 
 ### Mode B1 — Existing OpenTelemetry setup (`has_external_otel=True`)
 
-Use this when the project already manages its own `TracerProvider`.
+Use this when the project already manages its own `TracerProvider`. Pass `has_external_otel=True` to prevent the SDK from creating a second one.
 
 ```python
-from flowlines import Flowlines
+import flowlines
 from opentelemetry.sdk.trace import TracerProvider
 
-flowlines = Flowlines(api_key="<FLOWLINES_API_KEY>", has_external_otel=True)
+flowlines.init(api_key="<FLOWLINES_API_KEY>", has_external_otel=True)
 
 provider = TracerProvider()
 
@@ -76,32 +76,18 @@ for instrumentor in flowlines.get_instrumentors():
     instrumentor.instrument(tracer_provider=provider)
 ```
 
-- `create_span_processor()` must be called exactly once.
-- `get_instrumentors()` returns instrumentor instances only for libraries that are currently installed.
-
-### Mode B2 — Traceloop already initialized (`has_traceloop=True`)
-
-Use this when Traceloop SDK is already initialized. Traceloop must be initialized BEFORE Flowlines.
-
-```python
-from flowlines import Flowlines
-
-flowlines = Flowlines(api_key="<FLOWLINES_API_KEY>", has_traceloop=True)
-```
-
-Flowlines adds its span processor to the existing Traceloop `TracerProvider`. No instrumentor registration needed.
+- `create_span_processor()` returns a span processor that filters and exports LLM spans to Flowlines. Call it exactly once.
+- `get_instrumentors()` returns instrumentor instances for every supported provider library that is currently installed. You can also skip this and register instrumentors yourself.
 
 ## Critical rules
 
-1. **Initialize Flowlines BEFORE creating LLM clients.** The `Flowlines()` constructor must run before any LLM provider client is instantiated (e.g., `OpenAI()`, `Anthropic()`). If the client is created first, its calls will not be captured.
+1. **Initialize Flowlines BEFORE creating LLM clients.** `flowlines.init()` must run before any LLM provider client is instantiated (e.g., `OpenAI()`, `Anthropic()`). If the client is created first, its calls will not be captured.
 
-2. **Flowlines is a singleton.** Only one `Flowlines()` instance may exist. A second call raises `RuntimeError`. Store the instance and reuse it. Do NOT instantiate it multiple times.
+2. **Initialize once.** `flowlines.init()` must be called exactly once. A second call raises `RuntimeError`. Do NOT call it multiple times.
 
-3. **`has_external_otel` and `has_traceloop` are mutually exclusive.** Setting both to `True` raises `ValueError`.
+3. **`user_id` is mandatory in `context()`.** The context manager requires `user_id` as a keyword argument. `session_id` and `agent_id` are optional.
 
-4. **`user_id` is mandatory in `context()`.** The context manager requires `user_id` as a keyword argument. `session_id` and `agent_id` are optional.
-
-5. **Context does not auto-propagate to child threads/tasks.** If using threads or async tasks, set context in each thread/task explicitly.
+4. **Context does not auto-propagate to child threads/tasks.** If using threads or async tasks, set context in each thread/task explicitly.
 
 ## User, session, and agent tracking
 
@@ -122,14 +108,14 @@ with flowlines.context(user_id="user-42"):
 For cases where a context manager doesn't fit (e.g., across request boundaries in web frameworks), use the imperative API:
 
 ```python
-token = Flowlines.set_context(user_id="user-42", session_id="sess-abc", agent_id="agent-1")
+token = flowlines.set_context(user_id="user-42", session_id="sess-abc", agent_id="agent-1")
 try:
     client.chat.completions.create(...)
 finally:
-    Flowlines.clear_context(token)
+    flowlines.clear_context(token)
 ```
 
-`set_context()` / `clear_context()` are static methods on the `Flowlines` class.
+`set_context()` / `clear_context()` are module-level functions.
 
 ## Context integration guidance
 
@@ -159,37 +145,70 @@ When integrating `flowlines.context()`, you MUST wrap LLM calls with context. Fo
    ```
    Only include fields that are relevant. `session_id` and `agent_id` can be omitted entirely if not applicable.
 
-## Constructor parameters
+## Memory retrieval
+
+Retrieve user memory from the Flowlines backend with `get_memory()` (sync) or `aget_memory()` (async):
 
 ```python
-Flowlines(
+memory = flowlines.get_memory("user-42")
+memory = flowlines.get_memory("user-42", session_id="sess-abc", agent_id="agent-1", view="summary")
+```
+
+```python
+memory = await flowlines.aget_memory("user-42")
+```
+
+Both return a JSON string of the memory object, or `None` if no memory was found (HTTP 404). On other errors, they raise `FlowlinesMemoryError`.
+
+## Session management
+
+Signal that a session has ended with `end_session()` (sync) or `aend_session()` (async). This flushes pending spans before notifying the backend:
+
+```python
+flowlines.end_session("user-42", session_id="sess-abc")
+```
+
+```python
+await flowlines.aend_session("user-42", session_id="sess-abc")
+```
+
+On errors, they raise `FlowlinesSessionError`.
+
+## Initialization parameters
+
+```python
+flowlines.init(
     api_key: str,                    # Required. The Flowlines API key.
-    endpoint: str = "https://ingest.flowlines.ai",  # Backend URL.
+    ingest_endpoint: str = "https://ingest.flowlines.ai",  # Ingest backend URL.
+    api_endpoint: str = "https://api.flowlines.ai",  # API backend URL (memory, sessions).
     has_external_otel: bool = False,  # True if project has its own TracerProvider.
-    has_traceloop: bool = False,      # True if Traceloop is already initialized.
     verbose: bool = False,            # True to enable debug logging to stderr.
 )
 ```
 
+Both endpoints must use HTTPS, unless they target `localhost` / `127.0.0.1` / `::1` (useful for local development).
+
 ## Public API summary
 
-| Method / attribute | Description |
+| Function | Description |
 |-|-|
-| `Flowlines(api_key, ...)` | Constructor. Initializes the SDK (singleton). |
+| `flowlines.init(api_key, ...)` | Initializes the SDK. Must be called once before any LLM calls. |
 | `flowlines.context(user_id=..., session_id=..., agent_id=...)` | Context manager to tag spans with user/session/agent. |
-| `Flowlines.set_context(user_id=..., session_id=..., agent_id=...)` | Static. Imperative context setting; returns a token. |
-| `Flowlines.clear_context(token)` | Static. Restores previous context using the token. |
+| `flowlines.set_context(user_id=..., session_id=..., agent_id=...)` | Imperative context setting; returns a token. |
+| `flowlines.clear_context(token)` | Restores previous context using the token. |
 | `flowlines.create_span_processor()` | Returns a `SpanProcessor`. Mode B1 only. Call once. |
 | `flowlines.get_instrumentors()` | Returns list of available instrumentor instances. |
-| `flowlines.shutdown()` | Flush and shut down. Called automatically via `atexit`. |
+| `flowlines.get_memory(user_id, ...)` | Retrieves user memory (sync). Returns JSON string or `None`. |
+| `flowlines.aget_memory(user_id, ...)` | Retrieves user memory (async). Returns JSON string or `None`. |
+| `flowlines.end_session(user_id, ...)` | Signals session end and flushes spans (sync). |
+| `flowlines.aend_session(user_id, ...)` | Signals session end and flushes spans (async). |
 
 ## Imports
 
-The public API is exported from the top-level package:
+The public API is accessed via the top-level module:
 
 ```python
-from flowlines import Flowlines
-from flowlines import FlowlinesExporter  # only needed for advanced use
+import flowlines
 ```
 
 ## Verbose / debug mode
@@ -197,19 +216,14 @@ from flowlines import FlowlinesExporter  # only needed for advanced use
 Pass `verbose=True` to print debug information to stderr:
 
 ```python
-flowlines = Flowlines(api_key="...", verbose=True)
+flowlines.init(api_key="...", verbose=True)
 ```
 
 This logs instrumentor discovery, span filtering, and export results.
 
-## Shutdown
-
-`flowlines.shutdown()` is registered as an `atexit` handler automatically. It is idempotent — safe to call multiple times. You can call it explicitly if you need to ensure spans are flushed before the process ends (e.g., in serverless environments).
-
 ## Common mistakes to avoid
 
 - Do NOT create the LLM client before initializing Flowlines — spans will be missed.
-- Do NOT instantiate `Flowlines()` more than once — it raises `RuntimeError`.
-- Do NOT set both `has_external_otel=True` and `has_traceloop=True`.
+- Do NOT call `flowlines.init()` more than once — it raises `RuntimeError`.
 - Do NOT forget to install the instrumentation extras for the providers you use (e.g., `flowlines[openai]`).
 - Do NOT assume context propagates to child threads — set it explicitly in each thread/task.
