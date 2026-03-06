@@ -18,7 +18,7 @@ npm install @flowlines/sdk
 ```
 
 - Requires Node.js >= 20
-- Requires ESM (`"type": "module"` in package.json)
+- Works with both ESM and CommonJS projects
 
 ## Public API
 
@@ -63,7 +63,7 @@ import OpenAI from "openai";
 import { Flowlines } from "@flowlines/sdk";
 
 // CRITICAL: Initialize BEFORE creating any AI client instances.
-// Use instrumentModules to pass the imported module for reliable ESM instrumentation.
+// ALWAYS pass instrumentModules for reliable instrumentation.
 Flowlines.init({
   apiKey: process.env.FLOWLINES_API_KEY,
   instrumentModules: { openAI: OpenAI },
@@ -84,7 +84,7 @@ const response = await Flowlines.context({ userId: "user-123", sessionId: "sess-
 await Flowlines.shutdown();
 ```
 
-> **ESM note:** In ESM applications, all `import` statements are hoisted to the top of the module and executed before any other code. This means auto-instrumentation (without `instrumentModules`) may not patch modules in time. Always use `instrumentModules` to pass the imported modules explicitly — this guarantees reliable instrumentation regardless of import order.
+> **⚠️ Always pass `instrumentModules`.** Without it, the SDK relies on automatic monkey-patching which is fragile and often fails — especially in ESM applications where `import` statements are hoisted and executed before any other code runs. Always pass the imported AI modules explicitly via `instrumentModules` to guarantee reliable instrumentation.
 
 ### 2. External OpenTelemetry Mode
 
@@ -214,9 +214,9 @@ await Flowlines.endSession({
 });
 ```
 
-## Selective Instrumentation with `instrumentModules`
+## Passing `instrumentModules` (strongly recommended)
 
-By default, all 13+ supported libraries are instrumented. To instrument only specific libraries, pass `instrumentModules` with the imported modules. **The required import style varies by library:**
+You should always pass `instrumentModules` to `Flowlines.init()`. This ensures reliable instrumentation by explicitly providing the imported AI modules to the SDK. **The required import style varies by library:**
 
 **OpenAI — use the default import:**
 
@@ -261,15 +261,17 @@ Supported keys: `openAI`, `anthropic`, `cohere`, `bedrock`, `google_vertexai`, `
 
 ## Critical Integration Rules
 
-1. **Initialize Flowlines BEFORE creating AI client instances.** The SDK uses monkey-patching via OpenTelemetry instrumentation. Clients created before `Flowlines.init()` will not be instrumented.
+1. **Always pass `instrumentModules` in `Flowlines.init()`.** Without it, the SDK falls back to automatic monkey-patching which is fragile and often fails. Always import the AI libraries you use and pass them explicitly to ensure reliable instrumentation.
 
-2. **Only one Flowlines instance can exist at a time.** Calling `Flowlines.init()` when already initialized is a no-op (the call is silently skipped). Call `Flowlines.shutdown()` first if you need to re-initialize with different settings.
+2. **Initialize Flowlines BEFORE creating AI client instances.** The SDK uses monkey-patching via OpenTelemetry instrumentation. Clients created before `Flowlines.init()` will not be instrumented.
 
-3. **Always call `Flowlines.shutdown()` before process exit.** This flushes any pending spans to the backend. Without it, the last batch of traces may be lost.
+3. **Only one Flowlines instance can exist at a time.** Calling `Flowlines.init()` when already initialized is a no-op (the call is silently skipped). Call `Flowlines.shutdown()` first if you need to re-initialize with different settings.
 
-4. **Wrap LLM calls with `Flowlines.context()` to associate traces with users.** Without `Flowlines.context()`, spans are still exported but lack user/session/agent metadata.
+4. **Always call `Flowlines.shutdown()` before process exit.** This flushes any pending spans to the backend. Without it, the last batch of traces may be lost.
 
-5. **The SDK only exports LLM-related spans.** It filters for spans with `gen_ai.*` or `ai.*` attribute prefixes. Non-LLM OpenTelemetry spans (HTTP, DB, etc.) are discarded by the Flowlines exporter.
+5. **Wrap LLM calls with `Flowlines.context()` to associate traces with users.** Without `Flowlines.context()`, spans are still exported but lack user/session/agent metadata.
+
+6. **The SDK only exports LLM-related spans.** It filters for spans with `gen_ai.*` or `ai.*` attribute prefixes. Non-LLM OpenTelemetry spans (HTTP, DB, etc.) are discarded by the Flowlines exporter.
 
 ## Graceful Shutdown Pattern
 
