@@ -58,12 +58,39 @@ Flowlines.init({
 
 Flowlines creates and manages its own OpenTelemetry `NodeSDK`. This is the simplest setup.
 
+The SDK instruments AI libraries by monkey-patching their module exports. This only works if `Flowlines.init()` runs **before** those libraries are imported. In ESM applications, all `import` statements are hoisted and executed before any other code — so putting `Flowlines.init()` at the top of your file is not enough.
+
+**Option A: Use `--import` (ESM) or `--require` (CJS)**
+
+Create a separate instrumentation file and load it before your application:
+
+```typescript
+// instrumentation.ts
+import { Flowlines } from "@flowlines/sdk";
+
+Flowlines.init({
+  apiKey: process.env.FLOWLINES_API_KEY,
+});
+```
+
+Then start the application with:
+
+```bash
+# ESM
+node --import ./instrumentation.ts app.ts
+
+# CJS
+node --require ./instrumentation.js app.js
+```
+
+**Option B: Use `instrumentModules`**
+
+Pass imported modules explicitly — this works regardless of import order:
+
 ```typescript
 import OpenAI from "openai";
 import { Flowlines } from "@flowlines/sdk";
 
-// CRITICAL: Initialize BEFORE creating any AI client instances.
-// ALWAYS pass instrumentModules for reliable instrumentation.
 Flowlines.init({
   apiKey: process.env.FLOWLINES_API_KEY,
   instrumentModules: { openAI: OpenAI },
@@ -84,7 +111,7 @@ const response = await Flowlines.context({ userId: "user-123", sessionId: "sess-
 await Flowlines.shutdown();
 ```
 
-> **⚠️ Always pass `instrumentModules`.** Without it, the SDK relies on automatic monkey-patching which is fragile and often fails — especially in ESM applications where `import` statements are hoisted and executed before any other code runs. Always pass the imported AI modules explicitly via `instrumentModules` to guarantee reliable instrumentation.
+See [Passing `instrumentModules`](#passing-instrumentmodules) for the full list of supported keys.
 
 ### 2. External OpenTelemetry Mode
 
@@ -107,8 +134,8 @@ sdk.start();
 
 // ... use Flowlines.context as usual ...
 
-await Flowlines.shutdown();
 await sdk.shutdown();
+await Flowlines.shutdown();
 ```
 
 ## Attaching context to spans
@@ -214,9 +241,9 @@ await Flowlines.endSession({
 });
 ```
 
-## Passing `instrumentModules` (strongly recommended)
+## Passing `instrumentModules`
 
-You should always pass `instrumentModules` to `Flowlines.init()`. This ensures reliable instrumentation by explicitly providing the imported AI modules to the SDK. **The required import style varies by library:**
+When using Option B (see [Standalone Mode](#1-standalone-mode-recommended-for-most-apps)), pass `instrumentModules` to `Flowlines.init()` to explicitly provide the imported AI modules to the SDK. This works regardless of import order. **The required import style varies by library:**
 
 **OpenAI — use the default import:**
 
@@ -257,21 +284,19 @@ Flowlines.init({
 
 Supported keys: `openAI`, `anthropic`, `cohere`, `bedrock`, `google_vertexai`, `google_aiplatform`, `google_generativeai`, `pinecone`, `together`, `chromadb`, `qdrant`, `langchain`, `llamaIndex`, `mcp`.
 
-**Important:** The import style required depends on the library. OpenAI requires the **default import** (the class itself). Anthropic and most other libraries require a **namespace import** (`import * as X from "..."`). Using the wrong import style will cause instrumentation to silently fail or throw errors.
+**Important:** The import style required depends on the library. OpenAI requires the **default import** (the class itself). Anthropic requires a **namespace import** (`import * as X from "..."`). Using the wrong import style will cause instrumentation to silently fail or throw errors.
 
 ## Critical Integration Rules
 
-1. **Always pass `instrumentModules` in `Flowlines.init()`.** Without it, the SDK falls back to automatic monkey-patching which is fragile and often fails. Always import the AI libraries you use and pass them explicitly to ensure reliable instrumentation.
+1. **`Flowlines.init()` must run before AI libraries are imported and before AI client instances are created.** See [Standalone Mode](#1-standalone-mode-recommended-for-most-apps) for the two options to ensure correct initialization order.
 
-2. **Initialize Flowlines BEFORE creating AI client instances.** The SDK uses monkey-patching via OpenTelemetry instrumentation. Clients created before `Flowlines.init()` will not be instrumented.
+2. **Only one Flowlines instance can exist at a time.** Calling `Flowlines.init()` when already initialized is a no-op. Call `Flowlines.shutdown()` first if you need to re-initialize with different settings.
 
-3. **Only one Flowlines instance can exist at a time.** Calling `Flowlines.init()` when already initialized is a no-op (the call is silently skipped). Call `Flowlines.shutdown()` first if you need to re-initialize with different settings.
+3. **Always call `Flowlines.shutdown()` before process exit.** This flushes any pending spans to the backend. Without it, the last batch of traces may be lost.
 
-4. **Always call `Flowlines.shutdown()` before process exit.** This flushes any pending spans to the backend. Without it, the last batch of traces may be lost.
+4. **Wrap LLM calls with `Flowlines.context()`.** Without it, spans are still exported but lack user/session/agent metadata.
 
-5. **Wrap LLM calls with `Flowlines.context()` to associate traces with users.** Without `Flowlines.context()`, spans are still exported but lack user/session/agent metadata.
-
-6. **The SDK only exports LLM-related spans.** It filters for spans with `gen_ai.*` or `ai.*` attribute prefixes. Non-LLM OpenTelemetry spans (HTTP, DB, etc.) are discarded by the Flowlines exporter.
+5. **The SDK only exports LLM-related spans.** It filters for spans with `gen_ai.*` or `ai.*` attribute prefixes. Non-LLM OpenTelemetry spans (HTTP, DB, etc.) are discarded by the Flowlines exporter.
 
 ## Graceful Shutdown Pattern
 
