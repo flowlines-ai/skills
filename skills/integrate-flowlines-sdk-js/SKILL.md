@@ -319,6 +319,16 @@ process.on("SIGTERM", async () => {
 
 - **OpenAI `responses.create` is not instrumented.** The underlying OpenTelemetry instrumentation only patches `chat.completions.create`. Calls to the newer `responses.create` API will not produce traces. Use `chat.completions.create` for traced interactions.
 
+## Verifying trace ingestion
+
+If the user provides a Flowlines API key, you can verify that traces are being received by the backend:
+
+```bash
+curl -X GET 'http://api.flowlines.ai/v1/get-traces' -H 'x-flowlines-api-key: <FLOWLINES_API_KEY>'
+```
+
+Use this after the integration is complete and the application has made at least one LLM call, to confirm that traces are flowing correctly.
+
 ## Common Errors
 
 | Error | Cause | Fix |

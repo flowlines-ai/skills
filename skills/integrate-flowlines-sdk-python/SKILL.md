@@ -221,6 +221,16 @@ flowlines.init(api_key="...", verbose=True)
 
 This logs instrumentor discovery, span filtering, and export results.
 
+## Verifying trace ingestion
+
+If the user provides a Flowlines API key, you can verify that traces are being received by the backend:
+
+```bash
+curl -X GET 'http://api.flowlines.ai/v1/get-traces' -H 'x-flowlines-api-key: <FLOWLINES_API_KEY>'
+```
+
+Use this after the integration is complete and the application has made at least one LLM call, to confirm that traces are flowing correctly.
+
 ## Common mistakes to avoid
 
 - Do NOT create the LLM client before initializing Flowlines — spans will be missed.
