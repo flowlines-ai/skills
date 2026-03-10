@@ -113,6 +113,81 @@ await Flowlines.shutdown();
 
 See [Passing `instrumentModules`](#passing-instrumentmodules) for the full list of supported keys.
 
+### Next.js Integration
+
+Next.js supports an [instrumentation file](https://nextjs.org/docs/app/guides/instrumentation) that runs before the application starts, making it the ideal place to initialize the SDK. You must export a `register` function from this file — Next.js will call it once when a new server instance is initiated.
+
+**1. Create the instrumentation file:**
+
+```typescript
+// instrumentation.ts (project root)
+import { Flowlines } from "@flowlines/sdk";
+
+export function register() {
+  Flowlines.init({
+    apiKey: process.env.FLOWLINES_API_KEY,
+  });
+}
+```
+
+**2. Use `Flowlines.context()` in server-side code** (Route Handlers, Server Actions, etc.):
+
+```typescript
+// app/api/chat/route.ts
+import { Flowlines } from "@flowlines/sdk";
+import OpenAI from "openai";
+
+const openai = new OpenAI();
+
+export async function POST(req: Request) {
+  const { message, userId, sessionId } = await req.json();
+
+  return Flowlines.context({ userId, sessionId }, async () => {
+    const response = await openai.chat.completions.create({
+      model: "gpt-5",
+      messages: [{ role: "user", content: message }],
+    });
+    return Response.json({ reply: response.choices[0].message.content });
+  });
+}
+```
+
+**3. Configure webpack externals** to prevent Next.js from bundling the SDK and instrumented AI libraries. This is required for the SDK's monkey-patching to work correctly:
+
+```js
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  experimental: {
+    instrumentationHook: true,
+  },
+  webpack: (config, { isServer }) => {
+    if (isServer) {
+      config.externals.push("@flowlines/sdk", "openai");
+    }
+    return config;
+  },
+};
+
+export default nextConfig;
+```
+
+> **Note:** Add every AI library you instrument to the `externals` array (e.g. `"openai"`, `"@anthropic-ai/sdk"`, etc.).
+
+**Bundler compatibility:** If auto-instrumentation still doesn't work despite the externals config, pass modules explicitly via `instrumentModules`:
+
+```typescript
+// instrumentation.ts
+import OpenAI from "openai";
+import { Flowlines } from "@flowlines/sdk";
+
+export function register() {
+  Flowlines.init({
+    apiKey: process.env.FLOWLINES_API_KEY,
+    instrumentModules: { openAI: OpenAI },
+  });
+}
+```
+
 ### 2. External OpenTelemetry Mode
 
 Use when the app already has its own `NodeSDK` setup and you want to add Flowlines to the existing pipeline.
