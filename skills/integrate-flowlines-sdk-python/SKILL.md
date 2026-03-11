@@ -19,13 +19,13 @@ Then install instrumentation extras for the providers used in the project:
 
 ```bash
 # Single provider
-pip install flowlines[openai]
+pip install "flowlines[openai]"
 
 # Multiple providers
-pip install flowlines[openai,anthropic]
+pip install "flowlines[openai,anthropic]"
 
 # All supported providers
-pip install flowlines[all]
+pip install "flowlines[all]"
 ```
 
 Available extras: `openai`, `anthropic`, `google-generativeai`, `bedrock`, `cohere`, `vertexai`, `together`, `groq`, `mistralai`, `ollama`, `replicate`, `transformers`, `sagemaker`, `watsonx`, `writer`, `alephalpha`, `voyageai`, `openai-agents`, `pinecone`, `chromadb`, `qdrant`, `lancedb`, `marqo`, `milvus`, `weaviate`, `langchain`, `llamaindex`, `crewai`, `agno`, `haystack`, `mcp`.
@@ -213,7 +213,7 @@ flowlines.end_session(user_id=user_id, session_id=session_id)
 
 - Do NOT create the LLM client before calling `flowlines.init()` — spans will be missed.
 - Do NOT call `flowlines.init()` more than once — it raises `RuntimeError`.
-- Do NOT forget to install the instrumentation extras for the providers you use (e.g., `flowlines[openai]`).
+- Do NOT forget to install the instrumentation extras for the providers you use (e.g., `"flowlines[openai]"`).
 - Do NOT assume context propagates to child threads — set it explicitly in each thread/task.
 
 ## Verifying trace ingestion
