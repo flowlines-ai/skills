@@ -160,19 +160,29 @@ memory = await flowlines.aget_memory("user-42")
 
 Both return a JSON string of the memory object, or `None` if no memory was found (HTTP 404). On other errors, they raise `FlowlinesMemoryError`.
 
-## Session management
+## end_session integration guidance
 
-Signal that a session has ended with `end_session()` (sync) or `aend_session()` (async). This flushes pending spans before notifying the backend:
+When integrating Flowlines, look for places in the codebase where a session or conversation naturally ends, and add an `end_session` call there. Follow these steps:
 
-```python
-flowlines.end_session("user-42", session_id="sess-abc")
-```
+1. **Identify session boundaries** — look for code paths where a user session, conversation, or chat thread is considered finished. Common examples:
+   - A chat/conversation endpoint that receives an explicit "end conversation" or "close session" action from the user
+   - A WebSocket `on_disconnect` or connection-close handler
+   - A cleanup/logout handler where the user's session is torn down
+   - A background job or timeout that expires inactive sessions
+   - An explicit "done" or "goodbye" flow in a conversational agent loop
 
-```python
-await flowlines.aend_session("user-42", session_id="sess-abc")
-```
+2. **If clear session boundaries exist**, add `end_session` (or `aend_session` for async code) at those points. Make sure the `user_id` and `session_id` match what was passed to `flowlines.context()` earlier:
+   ```python
+   # Sync
+   flowlines.end_session(user_id=user_id, session_id=session_id)
 
-On errors, they raise `FlowlinesSessionError`.
+   # Async
+   await flowlines.aend_session(user_id=user_id, session_id=session_id)
+   ```
+
+3. **If session boundaries are ambiguous** (e.g., the app is a simple script or a single-shot CLI tool with no ongoing sessions), **do not add `end_session`**. It is only useful when the application has a concept of sessions that start and end.
+
+4. **If you're unsure** whether a particular code path represents a session boundary, ask the user.
 
 ## Initialization parameters
 

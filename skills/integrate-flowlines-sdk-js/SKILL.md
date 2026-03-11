@@ -303,18 +303,25 @@ const memory = await Flowlines.getMemory({
 
 Returns a JSON string with the memory content, or an empty string if no memory is found.
 
-## Ending a session
+## endSession integration guidance
 
-Use `Flowlines.endSession()` to mark a session as ended on the Flowlines backend. This flushes all pending spans before sending the end-session request, ensuring the backend has received all traces for the session.
+When integrating Flowlines, look for places in the codebase where a session or conversation naturally ends, and add an `endSession` call there. Follow these steps:
 
-```typescript
-import { Flowlines } from "@flowlines/sdk";
+1. **Identify session boundaries** — look for code paths where a user session, conversation, or chat thread is considered finished. Common examples:
+   - A chat/conversation endpoint that receives an explicit "end conversation" or "close session" action from the user
+   - A WebSocket `close` or `disconnect` event handler
+   - A cleanup/logout handler where the user's session is torn down
+   - A background job or timeout that expires inactive sessions
+   - An explicit "done" or "goodbye" flow in a conversational agent loop
 
-await Flowlines.endSession({
-  userId: "user_123",
-  sessionId: "sess_456",
-});
-```
+2. **If clear session boundaries exist**, add `Flowlines.endSession()` at those points. Make sure `userId` and `sessionId` match what was passed to `Flowlines.context()` earlier:
+   ```typescript
+   await Flowlines.endSession({ userId, sessionId });
+   ```
+
+3. **If session boundaries are ambiguous** (e.g., the app is a simple script or a single-shot CLI tool with no ongoing sessions), **do not add `endSession`**. It is only useful when the application has a concept of sessions that start and end.
+
+4. **If you're unsure** whether a particular code path represents a session boundary, ask the user.
 
 ## Passing `instrumentModules`
 
