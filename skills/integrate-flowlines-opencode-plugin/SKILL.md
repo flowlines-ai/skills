@@ -153,3 +153,13 @@ All OpenTelemetry spans emitted by OpenCode are captured and exported to the Flo
 | No spans in Flowlines dashboard | `experimental.openTelemetry` not enabled | Add `"experimental": { "openTelemetry": true }` to `.opencode/opencode.jsonc` |
 | Plugin initialization error in logs | Missing or invalid `FLOWLINES_API_KEY` | Set the `FLOWLINES_API_KEY` environment variable with a valid API key |
 | Plugin not loading | Plugin not listed in config | Add `"@flowlines/opencode-plugin"` to the `plugin` array in `.opencode/opencode.jsonc` |
+
+## Verifying trace ingestion
+
+If the user provides a Flowlines API key, you can verify that traces are being received by the backend:
+
+```bash
+curl -X GET 'http://api.flowlines.ai/v1/get-traces' -H 'x-flowlines-api-key: <FLOWLINES_API_KEY>'
+```
+
+Use this after the integration is complete and the application has made at least one LLM call, to confirm that traces are flowing correctly.

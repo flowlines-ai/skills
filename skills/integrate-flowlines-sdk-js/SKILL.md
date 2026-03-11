@@ -206,3 +206,13 @@ await Flowlines.endSession({
 `userId` and `sessionId` must match the values passed to `Flowlines.context()`.
 
 If the app has no concept of sessions that start and end (e.g. a single-shot CLI tool), **do not add `endSession`**. If session boundaries are ambiguous, ask the user.
+
+## Verifying trace ingestion
+
+If the user provides a Flowlines API key, you can verify that traces are being received by the backend:
+
+```bash
+curl -X GET 'http://api.flowlines.ai/v1/get-traces' -H 'x-flowlines-api-key: <FLOWLINES_API_KEY>'
+```
+
+Use this after the integration is complete and the application has made at least one LLM call, to confirm that traces are flowing correctly.

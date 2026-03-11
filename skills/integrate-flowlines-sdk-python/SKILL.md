@@ -215,3 +215,13 @@ flowlines.end_session(user_id=user_id, session_id=session_id)
 - Do NOT call `flowlines.init()` more than once — it raises `RuntimeError`.
 - Do NOT forget to install the instrumentation extras for the providers you use (e.g., `flowlines[openai]`).
 - Do NOT assume context propagates to child threads — set it explicitly in each thread/task.
+
+## Verifying trace ingestion
+
+If the user provides a Flowlines API key, you can verify that traces are being received by the backend:
+
+```bash
+curl -X GET 'http://api.flowlines.ai/v1/get-traces' -H 'x-flowlines-api-key: <FLOWLINES_API_KEY>'
+```
+
+Use this after the integration is complete and the application has made at least one LLM call, to confirm that traces are flowing correctly.
