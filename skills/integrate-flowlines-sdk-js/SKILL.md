@@ -1,68 +1,31 @@
 ---
 name: integrate-flowlines-sdk-js
-description: Integrates the @flowlines/sdk into a Node.js/TypeScript codebase. Use when adding Flowlines observability to an AI/LLM application, setting up OpenTelemetry instrumentation for AI libraries, or when the user asks to add Flowlines monitoring.
+description: Integrates the @flowlines/sdk into a Node.js/TypeScript/Next.js codebase. Use when adding Flowlines observability and memory to an AI/LLM application, setting up OpenTelemetry instrumentation for AI libraries, or when the user asks to add Flowlines monitoring or memory.
 ---
 
 # Flowlines SDK Integration Guide
 
-This document helps AI coding agents integrate the `@flowlines/sdk` into a Node.js/TypeScript codebase.
+Follow these steps to integrate the `@flowlines/sdk` into a Node.js/TypeScript application.
 
-## What is the Flowlines SDK?
-
-`@flowlines/sdk` is a TypeScript SDK that provides OpenTelemetry-based observability for AI/LLM applications. It automatically instruments 13+ AI libraries (OpenAI, Anthropic, Cohere, AWS Bedrock, Google Vertex AI, LangChain, etc.), filters to only export LLM-relevant spans, and sends them to the Flowlines backend.
-
-## Installation
+## Step 1: Install the SDK
 
 ```bash
 npm install @flowlines/sdk
 ```
 
-- Requires Node.js >= 20
-- Works with both ESM and CommonJS projects
+Requires Node.js >= 20.
 
-## Public API
+## Step 2: Initialize the SDK
 
-The SDK exports a single static class:
+The SDK instruments AI libraries by monkey-patching their module exports. This means `Flowlines.init()` must run **before** those libraries are imported and before any AI client instances are created.
 
-```typescript
-import { Flowlines } from "@flowlines/sdk";
-```
+Choose the initialization approach based on the application's setup:
 
-| Export | Kind | Purpose |
-|---|---|---|
-| `Flowlines` | Static class | Main entry point. Provides `init()`, `shutdown()`, `context()`, `getMemory()`, `endSession()`, `createSpanProcessor()`, and `getInstrumentations()` static methods. |
+### Standard Node.js app
 
-## Configuration
+**Option A: Separate instrumentation file (recommended)**
 
-```typescript
-Flowlines.init({
-  apiKey: string;                        // Required. Flowlines API key.
-  ingestEndpoint?: string;               // Default: "https://ingest.flowlines.ai"
-  apiEndpoint?: string;                  // Default: "https://api.flowlines.ai" (used by getMemory, endSession)
-  hasExternalOtel?: boolean;             // Default: false. Set true to compose with your own NodeSDK.
-  instrumentModules?: InstrumentModules; // Default: undefined (all libraries instrumented).
-  exportIntervalMs?: number;             // Default: 5000
-  maxQueueSize?: number;                 // Default: 2048
-  maxExportBatchSize?: number;           // Default: 512
-  verbose?: boolean;                     // Default: false
-});
-```
-
-**Validation rules:**
-- `apiKey` must be a non-empty string
-- `ingestEndpoint` and `apiEndpoint` must use HTTPS (HTTP is only allowed for localhost/127.0.0.1)
-
-## Two Integration Modes
-
-### 1. Standalone Mode (recommended for most apps)
-
-Flowlines creates and manages its own OpenTelemetry `NodeSDK`. This is the simplest setup.
-
-The SDK instruments AI libraries by monkey-patching their module exports. This only works if `Flowlines.init()` runs **before** those libraries are imported. In ESM applications, all `import` statements are hoisted and executed before any other code — so putting `Flowlines.init()` at the top of your file is not enough.
-
-**Option A: Use `--import` (ESM) or `--require` (CJS)**
-
-Create a separate instrumentation file and load it before your application:
+Create a dedicated file that runs before the application entry point:
 
 ```typescript
 // instrumentation.ts
@@ -73,7 +36,7 @@ Flowlines.init({
 });
 ```
 
-Then start the application with:
+Start the app with:
 
 ```bash
 # ESM
@@ -83,9 +46,11 @@ node --import ./instrumentation.ts app.ts
 node --require ./instrumentation.js app.js
 ```
 
-**Option B: Use `instrumentModules`**
+This ensures init runs before any AI library imports.
 
-Pass imported modules explicitly — this works regardless of import order:
+**Option B: Pass `instrumentModules` explicitly**
+
+If you cannot control the startup order (e.g., ESM hoists all imports), pass the AI modules directly — this works regardless of import order:
 
 ```typescript
 import OpenAI from "openai";
@@ -96,26 +61,16 @@ Flowlines.init({
   instrumentModules: { openAI: OpenAI },
 });
 
-// Now create your AI clients — they will be automatically instrumented.
 const openai = new OpenAI();
-
-// Use Flowlines.context to attach user/session metadata to spans.
-const response = await Flowlines.context({ userId: "user-123", sessionId: "sess-456" }, () =>
-  openai.chat.completions.create({
-    model: "gpt-4o",
-    messages: [{ role: "user", content: "Hello" }],
-  })
-);
-
-// Shutdown gracefully before process exit.
-await Flowlines.shutdown();
 ```
 
-See [Passing `instrumentModules`](#passing-instrumentmodules) for the full list of supported keys.
+Supported `instrumentModules` keys: `openAI`, `anthropic`, `cohere`, `bedrock`, `google_vertexai`, `google_aiplatform`, `google_generativeai`, `pinecone`, `together`, `chromadb`, `qdrant`, `langchain`, `llamaIndex`, `mcp`.
 
-### Next.js Integration
+> **Import style matters.** OpenAI requires a **default import** (`import OpenAI from "openai"`). Anthropic requires a **namespace import** (`import * as AnthropicModule from "@anthropic-ai/sdk"`). Using the wrong style causes instrumentation to silently fail.
 
-Next.js supports an [instrumentation file](https://nextjs.org/docs/app/guides/instrumentation) that runs before the application starts, making it the ideal place to initialize the SDK. You must export a `register` function from this file — Next.js will call it once when a new server instance is initiated.
+### Next.js app
+
+Next.js supports an [instrumentation file](https://nextjs.org/docs/app/guides/instrumentation) that runs before the application starts.
 
 **1. Create the instrumentation file:**
 
@@ -130,29 +85,7 @@ export function register() {
 }
 ```
 
-**2. Use `Flowlines.context()` in server-side code** (Route Handlers, Server Actions, etc.):
-
-```typescript
-// app/api/chat/route.ts
-import { Flowlines } from "@flowlines/sdk";
-import OpenAI from "openai";
-
-const openai = new OpenAI();
-
-export async function POST(req: Request) {
-  const { message, userId, sessionId } = await req.json();
-
-  return Flowlines.context({ userId, sessionId }, async () => {
-    const response = await openai.chat.completions.create({
-      model: "gpt-5",
-      messages: [{ role: "user", content: message }],
-    });
-    return Response.json({ reply: response.choices[0].message.content });
-  });
-}
-```
-
-**3. Configure webpack externals** to prevent Next.js from bundling the SDK and instrumented AI libraries. This is required for the SDK's monkey-patching to work correctly:
+**2. Configure webpack externals** in `next.config.mjs` to prevent bundling the SDK and AI libraries (required for monkey-patching to work):
 
 ```js
 /** @type {import('next').NextConfig} */
@@ -171,30 +104,17 @@ const nextConfig = {
 export default nextConfig;
 ```
 
-> **Note:** Add every AI library you instrument to the `externals` array (e.g. `"openai"`, `"@anthropic-ai/sdk"`, etc.).
+Add every instrumented AI library to the `externals` array (e.g. `"openai"`, `"@anthropic-ai/sdk"`).
 
-**Bundler compatibility:** If auto-instrumentation still doesn't work despite the externals config, pass modules explicitly via `instrumentModules`:
+If auto-instrumentation still doesn't work despite externals, use `instrumentModules` in the `register` function (see Option B above).
 
-```typescript
-// instrumentation.ts
-import OpenAI from "openai";
-import { Flowlines } from "@flowlines/sdk";
+### App with existing OpenTelemetry setup
 
-export function register() {
-  Flowlines.init({
-    apiKey: process.env.FLOWLINES_API_KEY,
-    instrumentModules: { openAI: OpenAI },
-  });
-}
-```
-
-### 2. External OpenTelemetry Mode
-
-Use when the app already has its own `NodeSDK` setup and you want to add Flowlines to the existing pipeline.
+If the app already has its own `NodeSDK`, set `hasExternalOtel: true` so Flowlines does not create a second one. Then compose Flowlines' processor and instrumentations into the existing setup:
 
 ```typescript
-import { Flowlines } from "@flowlines/sdk";
 import { NodeSDK } from "@opentelemetry/sdk-node";
+import { Flowlines } from "@flowlines/sdk";
 
 Flowlines.init({
   apiKey: process.env.FLOWLINES_API_KEY,
@@ -206,246 +126,83 @@ const sdk = new NodeSDK({
   instrumentations: Flowlines.getInstrumentations(),
 });
 sdk.start();
-
-// ... use Flowlines.context as usual ...
-
-await sdk.shutdown();
-await Flowlines.shutdown();
 ```
 
-## Attaching context to spans
+## Step 3: Attach context to LLM calls
 
-`Flowlines.context` attaches `flowlines.user_id`, `flowlines.session_id`, and `flowlines.agent_id` attributes to all LLM spans created within its callback. This is how Flowlines associates traces with users, sessions, and agents.
-
-```typescript
-interface FlowlinesContext {
-  userId: string;
-  sessionId: string;
-  agentId?: string;
-}
-
-Flowlines.context<T>(ctx: FlowlinesContext, fn: () => T): T;
-```
-
-- `userId` is required (string)
-- `sessionId` is required (string)
-- `agentId` is optional (omit to skip)
-- `fn` can be sync or async — the return value (or Promise) is forwarded
-- Supports nesting: inner calls override outer values
-- Must wrap every AI/LLM call that should carry user context
+Wrap every AI/LLM call with `Flowlines.context()` to attach user and session metadata to spans:
 
 ```typescript
-// Async usage with session and agent
-const result = await Flowlines.context(
-  { userId: "user-123", sessionId: "sess-456", agentId: "agent-1" },
-  async () => {
-    return await openai.chat.completions.create({ /* ... */ });
-  }
-);
-
-// Without agent ID
-await Flowlines.context({ userId: "user-123", sessionId: "sess-789" }, async () => {
-  await anthropic.messages.create({ /* ... */ });
-});
-
-// Nested contexts (inner overrides outer)
-await Flowlines.context({ userId: "user-A", sessionId: "sess-1" }, async () => {
-  // spans here have user_id="user-A", session_id="sess-1"
-  await Flowlines.context({ userId: "user-B", sessionId: "sess-2" }, async () => {
-    // spans here have user_id="user-B", session_id="sess-2"
+await Flowlines.context({ userId: "user-123", sessionId: "sess-456" }, async () => {
+  const response = await openai.chat.completions.create({
+    model: "gpt-4",
+    messages: [{ role: "user", content: "Hello!" }],
   });
 });
 ```
 
-## Context integration guidance
+- `userId` (required): the end-user making the request
+- `sessionId` (required): the conversation or session ID
+- `agentId` (optional): the AI agent handling the request
+- The callback can be sync or async — the return value is forwarded
+- Supports nesting: inner calls override outer values
 
-When integrating `Flowlines.context`, you MUST wrap LLM calls with context. Follow these steps:
+**How to choose values:**
 
-1. **Identify existing data** in the codebase that maps to `userId`, `sessionId`, and `agentId`:
-   - `userId`: the end-user making the request (e.g., authenticated user ID, email, API key owner)
-   - `sessionId` (required): the conversation or session grouping multiple interactions (e.g., chat thread ID, session token, conversation UUID)
-   - `agentId` (optional): the AI agent or assistant handling the request (e.g., agent name, bot identifier, assistant ID)
-
-2. **If obvious mappings exist**, use them directly. For example, if the app has `req.user.id` and a `threadId`, wire them in:
-   ```typescript
-   await Flowlines.context({ userId: req.user.id, sessionId: threadId }, async () => { ... });
-   ```
-
-3. **If mappings are unclear**, ask the user which variables or fields should be used for `userId`, `sessionId`, and `agentId`.
-
-4. **If no data is available yet**, propose using placeholder values with TODO comments so the integration is functional and easy to complete later:
-   ```typescript
-   await Flowlines.context(
-     {
-       userId: "anonymous", // TODO: replace with actual user identifier
-       sessionId: `sess-${Date.now()}`, // TODO: replace with actual session/conversation ID
-       agentId: "my-agent", // TODO: replace with actual agent identifier
-     },
-     async () => { ... }
-   );
-   ```
-   Only include optional fields that are relevant. `agentId` can be omitted entirely if not applicable.
-
-## Fetching memory
-
-Use `Flowlines.getMemory()` to retrieve memory context from the Flowlines backend for a given user:
+1. If the codebase has obvious mappings (e.g. `req.user.id`, `threadId`), use them directly.
+2. If mappings are unclear, ask the user which variables to use.
+3. If no data is available yet, use placeholder values with TODO comments:
 
 ```typescript
-import { Flowlines } from "@flowlines/sdk";
+await Flowlines.context(
+  {
+    userId: "anonymous", // TODO: replace with actual user identifier
+    sessionId: `sess-${Date.now()}`, // TODO: replace with actual session/conversation ID
+  },
+  async () => { ... }
+);
+```
 
+## Step 4: Fetch and use memory
+
+Use `Flowlines.getMemory()` to retrieve memory context for a user. Inject the returned string into your LLM conversation (e.g. as a system message):
+
+```typescript
 const memory = await Flowlines.getMemory({
   userId: "user_123",
-  sessionId: "sess_456",  // optional
+  sessionId: "sess_456",
   agentId: "agent_1",     // optional
-  view: "summary",        // optional
+});
+
+await Flowlines.context({ userId: "user_123", sessionId: "sess_456" }, async () => {
+  const response = await openai.chat.completions.create({
+    model: "gpt-4",
+    messages: [
+      { role: "system", content: `You are a helpful assistant.\n\n${memory}` },
+      { role: "user", content: "What were we talking about last time?" },
+    ],
+  });
 });
 ```
 
-Returns a JSON string with the memory content, or an empty string if no memory is found.
+`getMemory()` returns a JSON string with the memory content, or an empty string if no memory is found.
 
-## endSession integration guidance
+## Step 5: End a session
 
-When integrating Flowlines, look for places in the codebase where a session or conversation naturally ends, and add an `endSession` call there. Follow these steps:
+Look for places where a session or conversation naturally ends and call `Flowlines.endSession()` there. This flushes pending spans and notifies the backend. Common examples:
 
-1. **Identify session boundaries** — look for code paths where a user session, conversation, or chat thread is considered finished. Common examples:
-   - A chat/conversation endpoint that receives an explicit "end conversation" or "close session" action from the user
-   - A WebSocket `close` or `disconnect` event handler
-   - A cleanup/logout handler where the user's session is torn down
-   - A background job or timeout that expires inactive sessions
-   - An explicit "done" or "goodbye" flow in a conversational agent loop
-
-2. **If clear session boundaries exist**, add `Flowlines.endSession()` at those points. Make sure `userId` and `sessionId` match what was passed to `Flowlines.context()` earlier:
-   ```typescript
-   await Flowlines.endSession({ userId, sessionId });
-   ```
-
-3. **If session boundaries are ambiguous** (e.g., the app is a simple script or a single-shot CLI tool with no ongoing sessions), **do not add `endSession`**. It is only useful when the application has a concept of sessions that start and end.
-
-4. **If you're unsure** whether a particular code path represents a session boundary, ask the user.
-
-## Passing `instrumentModules`
-
-When using Option B (see [Standalone Mode](#1-standalone-mode-recommended-for-most-apps)), pass `instrumentModules` to `Flowlines.init()` to explicitly provide the imported AI modules to the SDK. This works regardless of import order. **The required import style varies by library:**
-
-**OpenAI — use the default import:**
+- An explicit "end conversation" or "close session" action
+- A WebSocket `close` or `disconnect` event
+- A session cleanup or logout handler
+- A timeout that expires inactive sessions
 
 ```typescript
-import OpenAI from "openai";
-
-Flowlines.init({
-  apiKey: process.env.FLOWLINES_API_KEY,
-  instrumentModules: { openAI: OpenAI },
+await Flowlines.endSession({
+  userId: "user_123",
+  sessionId: "sess_456",
 });
 ```
 
-**Anthropic — use a namespace import:**
+`userId` and `sessionId` must match the values passed to `Flowlines.context()`.
 
-```typescript
-import * as AnthropicModule from "@anthropic-ai/sdk";
-
-Flowlines.init({
-  apiKey: process.env.FLOWLINES_API_KEY,
-  instrumentModules: { anthropic: AnthropicModule },
-});
-```
-
-**Both together:**
-
-```typescript
-import OpenAI from "openai";
-import * as AnthropicModule from "@anthropic-ai/sdk";
-
-Flowlines.init({
-  apiKey: process.env.FLOWLINES_API_KEY,
-  instrumentModules: {
-    openAI: OpenAI,
-    anthropic: AnthropicModule,
-  },
-});
-```
-
-Supported keys: `openAI`, `anthropic`, `cohere`, `bedrock`, `google_vertexai`, `google_aiplatform`, `google_generativeai`, `pinecone`, `together`, `chromadb`, `qdrant`, `langchain`, `llamaIndex`, `mcp`.
-
-**Important:** The import style required depends on the library. OpenAI requires the **default import** (the class itself). Anthropic requires a **namespace import** (`import * as X from "..."`). Using the wrong import style will cause instrumentation to silently fail or throw errors.
-
-## Critical Integration Rules
-
-1. **`Flowlines.init()` must run before AI libraries are imported and before AI client instances are created.** See [Standalone Mode](#1-standalone-mode-recommended-for-most-apps) for the two options to ensure correct initialization order.
-
-2. **Only one Flowlines instance can exist at a time.** Calling `Flowlines.init()` when already initialized is a no-op. Call `Flowlines.shutdown()` first if you need to re-initialize with different settings.
-
-3. **Always call `Flowlines.shutdown()` before process exit.** This flushes any pending spans to the backend. Without it, the last batch of traces may be lost.
-
-4. **Wrap LLM calls with `Flowlines.context()`.** Without it, spans are still exported but lack user/session/agent metadata.
-
-5. **The SDK only exports LLM-related spans.** It filters for spans with `gen_ai.*` or `ai.*` attribute prefixes. Non-LLM OpenTelemetry spans (HTTP, DB, etc.) are discarded by the Flowlines exporter.
-
-## Graceful Shutdown Pattern
-
-```typescript
-Flowlines.init({ apiKey: "..." });
-
-// Handle process signals
-process.on("SIGINT", async () => {
-  await Flowlines.shutdown();
-  process.exit(0);
-});
-
-process.on("SIGTERM", async () => {
-  await Flowlines.shutdown();
-  process.exit(0);
-});
-```
-
-## Known Limitations
-
-- **OpenAI `responses.create` is not instrumented.** The underlying OpenTelemetry instrumentation only patches `chat.completions.create`. Calls to the newer `responses.create` API will not produce traces. Use `chat.completions.create` for traced interactions.
-
-## Verifying trace ingestion
-
-If the user provides a Flowlines API key, you can verify that traces are being received by the backend:
-
-```bash
-curl -X GET 'http://api.flowlines.ai/v1/get-traces' -H 'x-flowlines-api-key: <FLOWLINES_API_KEY>'
-```
-
-Use this after the integration is complete and the application has made at least one LLM call, to confirm that traces are flowing correctly.
-
-## Common Errors
-
-| Error | Cause | Fix |
-|---|---|---|
-| `Flowlines API key is required` | Empty or missing `apiKey` | Provide a valid API key |
-| `Cannot set both hasExternalOtel and hasTraceloop` | Both flags set to true | Use only one mode flag |
-| `Invalid Flowlines endpoint URL` | Malformed URL in `ingestEndpoint` or `apiEndpoint` | Provide a valid URL |
-| `Insecure Flowlines endpoint` | HTTP endpoint that is not localhost | Use HTTPS, or use localhost for development |
-
-## Full Example: Anthropic Chat with Tools
-
-```typescript
-import * as AnthropicModule from "@anthropic-ai/sdk";
-import Anthropic from "@anthropic-ai/sdk";
-import { Flowlines } from "@flowlines/sdk";
-
-// 1. Init Flowlines FIRST
-Flowlines.init({
-  apiKey: process.env.FLOWLINES_API_KEY,
-  instrumentModules: { anthropic: AnthropicModule },
-});
-
-// 2. Then create the AI client
-const client = new Anthropic();
-
-// 3. Wrap calls with Flowlines.context
-const sessionId = `sess-${Date.now()}`;
-const reply = await Flowlines.context({ userId: "user-123", sessionId }, () =>
-  client.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 1024,
-    messages: [{ role: "user", content: "Hello!" }],
-  })
-);
-
-// 4. Shutdown before exit
-await Flowlines.shutdown();
-```
+If the app has no concept of sessions that start and end (e.g. a single-shot CLI tool), **do not add `endSession`**. If session boundaries are ambiguous, ask the user.
