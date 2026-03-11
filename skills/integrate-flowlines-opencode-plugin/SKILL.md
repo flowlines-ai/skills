@@ -82,6 +82,50 @@ const result = await client.session.prompt({
 - **`username`** maps to the `userId` in Flowlines. Set this to identify which user is making requests.
 - **`sessionId`** is passed as `path.id` when calling `client.session.prompt()`. This identifies the conversation session in Flowlines.
 
+## Fetch and use memory
+
+Use `Flowlines.getMemory()` to retrieve memory context for a user. Inject the returned string into your prompt (e.g. as part of the message):
+
+```ts
+import { Flowlines } from "@flowlines/sdk";
+
+const memory = await Flowlines.getMemory({
+  userId: "user_123",
+  sessionId: "sess_456",
+  agentId: "agent_1", // optional
+});
+
+const result = await client.session.prompt({
+  path: { id: sessionId },
+  body: {
+    parts: [{ type: "text", text: `${memory}\n\nHello!` }],
+  },
+});
+```
+
+`getMemory()` returns a JSON string with the memory content, or an empty string if no memory is found.
+
+## End a session
+
+Look for places where a session or conversation naturally ends and call `Flowlines.endSession()` there. This flushes pending spans and notifies the backend. Common examples:
+
+- An explicit "end conversation" or "close session" action
+- A session cleanup or logout handler
+- A timeout that expires inactive sessions
+
+```ts
+import { Flowlines } from "@flowlines/sdk";
+
+await Flowlines.endSession({
+  userId: "user_123",
+  sessionId: "sess_456",
+});
+```
+
+`userId` and `sessionId` must match the values used in the config (`username`) and session prompt (`path.id`).
+
+If the app has no concept of sessions that start and end (e.g. interactive CLI usage), **do not add `endSession`**. If session boundaries are ambiguous, ask the user.
+
 ## How It Works
 
 The plugin:
